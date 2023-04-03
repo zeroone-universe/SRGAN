@@ -20,6 +20,8 @@ class Discriminator(nn.Module):
     def __init__(self):
         super(Discriminator, self).__init__()
         
+        self.adv_loss = BCEWithLogitsLoss()
+        
         #Feature Extraction
         self.conv1 = nn.Sequential(
             nn.Conv2d(3, 64, kernel_size=3, padding=1, stride=1),
@@ -54,3 +56,20 @@ class Discriminator(nn.Module):
         output = self.classification(x)
         
         return output
+    
+    def loss_d(self, x_fake, x_real):
+        x_fake = x_fake.detach()
+        y_fake = self.forward(x_fake)
+        y_real = self.forward(x_real)
+        real_loss = adv_loss(y_real, torch.ones_like(y_real))
+        fake_loss = adv_loss(y_fake, torch.zeros_like(y_fake))
+        loss_disc = real_loss + fake_loss
+        
+        return loss_disc
+        
+        
+    def loss_g(self, x_fake, x_real):
+        y_fake = self.forward(x_fake)
+        loss_gen = adv_loss(y_fake, torch.ones_like(y_fake))
+        
+        return loss_gen
