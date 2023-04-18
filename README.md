@@ -31,7 +31,7 @@ The trained model will be saved as ckpt file in 'logger' directory. You can then
 
 
 ## Note
-- 
+- Due to the limited dataset and low computer system during the practice environment, the performance of the code has not been thoroughly validated.
 
 ## Citation
 
