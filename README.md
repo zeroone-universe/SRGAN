@@ -8,11 +8,11 @@ This code was developed for the final project of the Computer Vision course (EC4
  
 To run this code, you will need:
 
-Pillow==9.5.0
-pytorch_lightning==2.0.0
-PyYAML==6.0
-torch==2.0.0
-torchvision==0.15.0
+- torch==2.0.0
+- torchvision==0.15.0
+- Pillow==9.5.0
+- pytorch_lightning==2.0.0
+- PyYAML==6.0
 
 To automatically install these libraries, run the following command:
 
