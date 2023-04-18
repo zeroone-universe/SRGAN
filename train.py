@@ -1,162 +1,168 @@
 import pytorch_lightning as pl
 import torch
-from torch import nn
-import torch.nn.functional as F
-import torchaudio.transforms as T
-import random
 
-import torchaudio as ta
+from torchvision import transforms
 
-import os
 
 from model.discriminator import Discriminator
 from model.generator import Generator
 from model.contentloss import ContentLoss
+from model.tvloss import TVLoss
+
+from math import sqrt, ceil
+from torchvision.utils import make_grid
+
+from utils import *
+
 
 class SRGANTrain(pl.LightningModule):
     def __init__(self, config):
         super(SRGANTrain, self).__init__()
         self.automatic_optimization = False
         
-        self.lr1 = config['optim']['learning_rate1']
-        self.lr2 = config['optim']['learning_rate2']
+        self.lr = config['optim']['learning_rate']
         self.B1 = config['optim']['B1']
         self.B2 = config['optim']['B2']
         
         self.generator = Generator()
         self.discriminator = Discriminator()
-        self.contentloss = ContentLoss()
         
-        self.val_step = config['train']['val_step']
+        self.mse_loss = torch.nn.MSELoss()
+        self.contentloss = ContentLoss(config)
+        self.tv_loss = TVLoss()
         
-        self.lr_scheduler = lr_scheduler.LambdaLR(
-            self.optimizer,
-            lr_lambda=lambda epoch: 0.0001 if self.trainer.global_step < 100000 else 0.00001
-        )
+        self.lambda_image = config['loss']['lambda_image']
+        self.lambda_adv = config['loss']['lambda_adv']
+        self.lambda_content = config['loss']['lambda_content']
+        self.lambda_tv = config['loss']['lambda_tv']
+              
+        self.output_dir_path = config['train']['output_dir_path']
+        
+        self.config = config
 
-        
+        self.to_pil = transforms.Compose([transforms.ToPILImage()])
+    
+
     def forward(self,x):
-        
-
+        output = self.generator(x)
         return output
 
     def configure_optimizers(self):
 
-        optimizer_d = torch.optim.Adam(self.discriminator.parameters(), lr=self.lr, betas = (self.B1, self.B2)
+        optimizer_d = torch.optim.Adam(self.discriminator.parameters(), lr=self.lr, betas = (self.B1, self.B2))
         optimizer_g = torch.optim.Adam(self.generator.parameters(), lr=self.lr, betas = (self.B1, self.B2))
+        
+        # return optimizer_d, optimizer_g
 
-        return optimizer_d, optimizer_g #, [lrscheduler_d, lr_scheduler_g])
+        lr_scheduler_d = torch.optim.lr_scheduler.StepLR(optimizer_d, step_size = 1e+5, gamma= 0.1)
+        lr_scheduler_g = torch.optim.lr_scheduler.StepLR(optimizer_g, step_size = 1e+5, gamma= 0.1)
 
+        return ({'optimizer': optimizer_d, 'lr_scheduler': lr_scheduler_d}, {'optimizer': optimizer_g, 'lr_scheduler': lr_scheduler_g})
 
     def training_step(self, batch, batch_idx):
         
-        optimizer_d, optimizer_g = self.optimizers()
+        optimizer_d, optimizer_g= self.optimizers()
+        lr_scheduler_d, lr_scheduler_g = self.lr_schedulers()
         
-        wav_nb, wav_wb, _ = batch
+        image_lr, image_hr, filename = batch
         
-        if self.normalize:
-            wav_std = wav_nb.std(dim=-1, keepdim=True) + 1e-3
-            wav_nb = wav_nb/wav_std        
-        else:
-            wav_std = 1
-            
-        wav_bwe = self.forward(wav_nb)
-        wav_bwe = wav_bwe * wav_std
-
-        #optimize discriminator
+        image_sr = self.forward(image_lr)
+               
+        #optimizer G
+        #followed loss combination of https://github.com/leftthomas/SRGAN/tree/bed685fd4f48cfcecfc5b3a728aa0d220b1a11c0
         
-        loss_d =self.discriminator.loss_D(wav_bwe, wav_wb)
+        self.toggle_optimizer(optimizer_g)
         
-        optimizer_d.zero_grad()
-        self.manual_backward(loss_d)
-        optimizer_d.step()
-
+        image_loss = self.mse_loss(image_sr * 2 - 1, image_hr * 2 - 1) #range [-1. 1]
+        advloss_g = self.discriminator.loss_g(image_sr, image_hr)
+        contentloss = self.contentloss(image_sr, image_hr)
+        tv_loss = self.tv_loss(image_sr)
         
-        #optimize generator
-
-        loss_g = self.discriminator.loss_G(wav_bwe, wav_wb)
+        
+        loss_g = self.lambda_image * image_loss + self.lambda_adv * advloss_g + self.lambda_content * contentloss + self.lambda_tv * tv_loss
         
         optimizer_g.zero_grad()
         self.manual_backward(loss_g)
         optimizer_g.step()
         
+        self.untoggle_optimizer(optimizer_g)
         
-        self.log("train_loss_d", loss_d, prog_bar = True, batch_size = self.config['dataset']['batch_size'])
-        self.log("train_loss_g", loss_g, prog_bar = True, batch_size = self.config['dataset']['batch_size'])
+        #optimizer D
+        
+        self.toggle_optimizer(optimizer_d)
+        
+        advloss_d = self.discriminator.loss_d(image_sr, image_hr)
+        loss_d = advloss_d
+        
+        optimizer_d.zero_grad()
+        self.manual_backward(loss_d)
+        optimizer_d.step()
+        
+        self.untoggle_optimizer(optimizer_d)
 
-            
+        
+        self.log("train/advloss_d", advloss_d,  prog_bar = True,  batch_size = self.config['dataset']['batch_size'])
+        
+        self.log("train/image_loss", image_loss, prog_bar = True,  batch_size = self.config['dataset']['batch_size'])
+        self.log("train/advloss_g", advloss_g, prog_bar = True,  batch_size = self.config['dataset']['batch_size'])
+        self.log("train/contentloss", contentloss,  prog_bar = True,  batch_size = self.config['dataset']['batch_size'])        
+        self.log("train/tv_loss", tv_loss,  prog_bar = True, batch_size = self.config['dataset']['batch_size'])
+        
+        lr_scheduler_d.step()
+        lr_scheduler_g.step()
+        
 
+    
+    
     def validation_step(self, batch, batch_idx):
         
-        wav_nb, wav_wb, filename = batch
+        image_lr, image_hr, filename = batch
 
-        if self.normalize:
-            wav_std = wav_nb.std(dim=-1, keepdim=True) + 1e-3
-            wav_nb = wav_nb/wav_std        
-        else:
-            wav_std = 1
-    
-        wav_bwe = self.forward(wav_nb)
+        image_sr = self.forward(image_lr)
         
-        wav_bwe = wav_bwe * wav_std
+        advloss_d = self.discriminator.loss_d(image_sr, image_hr)
         
-        loss_d = self.discriminator.loss_D(wav_bwe, wav_wb)
-        loss_g = self.discriminator.loss_G(wav_bwe, wav_wb)
-       
-        if self.current_epoch%self.save_epoch == self.save_epoch-1:
-            wav_bwe_cpu = wav_bwe.squeeze(0).cpu()
-            val_dir_path = f"{self.output_dir_path}/epoch_{self.current_epoch}"
-            check_dir_exist(val_dir_path)
-            ta.save(os.path.join(val_dir_path, f"{filename[0]}.wav"), wav_bwe_cpu, 16000)
-        else:
-            wav_bwe_cpu = wav_bwe.squeeze(0).cpu()
-            val_dir_path = f"{self.output_dir_path}/epoch_current"
-            check_dir_exist(val_dir_path)
-            ta.save(os.path.join(val_dir_path, f"{filename[0]}.wav"), wav_bwe_cpu, 16000)
-
-        wav_wb = wav_wb.squeeze().cpu().numpy()
-        wav_bwe = wav_bwe.squeeze().cpu().numpy()
-
-        val_pesq_wb = pesq(fs = 16000, ref = wav_wb, deg = wav_bwe, mode = "wb")
-        val_pesq_nb = pesq(fs = 16000, ref = wav_wb, deg = wav_bwe, mode = "nb")
+        image_loss = self.mse_loss(image_sr, image_hr)
+        advloss_g = self.discriminator.loss_g(image_sr, image_hr)
+        contentloss = self.contentloss(image_sr, image_hr)
+        tv_loss = self.tv_loss(image_sr)        
         
-        self.log_dict({"val_loss/val_loss_d": loss_d, "val_loss/val_loss_g": loss_g}, batch_size = self.config['dataset']['batch_size'])
-        self.log('val_pesq_wb', val_pesq_wb)
-        self.log('val_pesq_nb', val_pesq_nb)
+        
+        self.log("val/advloss_d", advloss_d, batch_size = self.config['dataset']['batch_size'])
+        
+        self.log("val/image_loss", image_loss, batch_size = self.config['dataset']['batch_size'])
+        self.log("val/advloss_g", advloss_g,batch_size = self.config['dataset']['batch_size'])
+        self.log("val/contentloss", contentloss, batch_size = self.config['dataset']['batch_size'])        
+        self.log("val/tv_loss", tv_loss,  batch_size = self.config['dataset']['batch_size'])
 
 
 
+        nrow = ceil(sqrt(self.config['dataset']['batch_size']))
+        self.logger.experiment.add_image(
+            tag='train/lr_img',
+            img_tensor=make_grid(image_lr, nrow=nrow, padding=0),
+            global_step=self.global_step
+        )
+        self.logger.experiment.add_image(
+            tag='train/hr_img',
+            img_tensor=make_grid(image_hr, nrow=nrow, padding=0),
+            global_step=self.global_step
+        )
+        self.logger.experiment.add_image(
+            tag='train/sr_img',
+            img_tensor=make_grid(image_sr, nrow=nrow, padding=0),
+            global_step=self.global_step
+        )
 
     def test_step(self, batch, batch_idx):
+        image_lr, image_hr, filename = batch
+
+        image_sr = self.forward(image_lr)
+        image_sr = image_sr.squeeze(0)
         
-        wav_nb, wav_wb, filename = batch
-
-        if self.normalize:
-            wav_std = wav_nb.std(dim=-1, keepdim=True) + 1e-3
-            wav_nb = wav_nb/wav_std        
-        else:
-            wav_std = 1
-
-        wav_bwe = self.forward(wav_nb)
-
-        wav_bwe = wav_bwe * wav_std
+        image_sr = self.to_pil(image_sr)
+        image_sr.save(f"{self.output_dir_path}/{filename[0]}")
         
-        wav_bwe_cpu = wav_bwe.squeeze(0).cpu()
-        test_dir_path = f"{self.output_dir_path}/epoch_test"
-        check_dir_exist(test_dir_path)
-        ta.save(os.path.join(test_dir_path, f"{filename[0]}.wav"), wav_bwe_cpu, 16000)
-
-        wav_wb = wav_wb.squeeze().cpu().numpy()
-        wav_bwe = wav_bwe.squeeze().cpu().numpy()
-
-        test_pesq_wb = pesq(fs = 16000, ref = wav_wb, deg = wav_bwe, mode = "wb")
-        test_pesq_nb = pesq(fs = 8000, ref = wav_wb, deg = wav_bwe, mode = "nb")
-
-        self.log('test_pesq_wb', test_pesq_wb)
-        self.log('test_pesq_nb', test_pesq_nb)
-
-    
-
 
     def predict_step(self, batch, batch_idx):
         pass

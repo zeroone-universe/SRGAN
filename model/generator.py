@@ -76,3 +76,6 @@ class ResidualBlock(nn.Module):
         #elementwise sum
         output = output + x
         return output
+    
+if __name__ == "__main__":
+    generator = Generator

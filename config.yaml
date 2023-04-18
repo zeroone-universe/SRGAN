@@ -2,7 +2,6 @@
 #Config that does not have impact on performance
 #-----------------------------------------------
 
-
 random_seed: 0b011011
 
 #-----------------------------------------------
@@ -12,20 +11,12 @@ random_seed: 0b011011
 dataset:
 
 #directory that have every dataset in it.
-  # data_dir: "/media/youngwon/Neo/NeoChoi/Research/CodecEnhancement/CSE+BWE/Dataset/CSE+BWE_dataset"
-  data_dir: "/media/zeroone"
+  train_dataset_path: ""
+  val_dataset_path: ""
+  test_dataset_path: ""
 
-  nb_train: "downsampled/train"
-  nb_test: "downsampled/test"
-
-  wb_train: "target/train"
-  wb_test: "target/test"
-
-#So for this case, wideband test dataset should be located at "/media/zeroone/target/test"
-
+  image_size: 96
   batch_size: 16
-  seg_len: 2
-  
   num_workers: 16
  
 #-----------------------------------------------
@@ -38,6 +29,11 @@ dataset:
 #3. Loss
 #-----------------------------------------------
 
+loss:
+  lambda_image: 1
+  lambda_adv : 0.001
+  lambda_content : 0.006
+  lambda_tv: 0.00000002
 
 
 #-----------------------------------------------
@@ -45,8 +41,8 @@ dataset:
 #-----------------------------------------------
 
 optim:
-  learning_rate1: 0.0001
-  learning_rate2: 0.00001
+  learning_rate: 0.0001 #before 100000 step
+
 
   B1: 0.9
   B2: 0.999
@@ -57,12 +53,11 @@ optim:
 #-----------------------------------------------
 
 train:
-  normalize: False
-
-  val_step: 20000
+  val_epoch: 20
+  total_step: 400000 #Due to the existence of two optimizers, a total_step of 400,000 is equivalent to 200,000 actual steps.
 
   
 #Path of output of validation. 
-  output_dir_path: "/media/zeroone/output"
-  logger_path: "/media/zeroone/logger"
+  output_dir_path: "./output"
+  logger_path: "./logger"
 
