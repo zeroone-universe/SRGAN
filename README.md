@@ -2,7 +2,7 @@
 
 This is an unofficial pytorch lightning implementation of SRGAN (Super-Resolution Generative Adversarial Network), a deep learning model for image super-resolution. The model is trained on the DIV2K dataset and can upscale images by a factor of 4x.
 
-This code was developed for the final project of the Computer Vision course (EC4216) at GIST, and has recently been modified to comply with the pytorch lightning 2.0.0 framework.
+This code was developed for the final project of the Computer Vision course (EC4216) at GIST in 2021, and has recently been modified to comply with the pytorch lightning 2.0.0 framework.
 
 ## Requirements
  
