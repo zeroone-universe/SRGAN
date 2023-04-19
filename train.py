@@ -15,7 +15,7 @@ from torchvision.utils import make_grid
 from utils import *
 
 
-class SRGANTrain(pl.LightningModule):
+class SRGANTrain(pl.LightningModule): 
     def __init__(self, config):
         super(SRGANTrain, self).__init__()
         self.automatic_optimization = False
