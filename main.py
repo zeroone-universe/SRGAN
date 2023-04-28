@@ -19,20 +19,6 @@ def main(config):
     check_dir_exist(config['train']['logger_path'])
     
     tb_logger = pl_loggers.TensorBoardLogger(config['train']['logger_path'], name=f"SRGAN_logs")
-    
-    #-----textlogger-----
-    # textlogger = logging.getLogger("TEXT")
-    # textlogger.setLevel(logging.INFO)
-
-    # formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    # file_handler = logging.FileHandler(f"{LOGGER_PATH}/modelconfig.log")
-    # file_handler.setFormatter(formatter)
-    # textlogger.addHandler(file_handler)
-
-    # textlogger.info(train_codecpp.get_config())
-
-    # progress_bar = ProgressBar()
-    # progress_bar.log_to_file = True
 
     tb_logger.log_hyperparams(config)
 
@@ -49,7 +35,7 @@ def main(config):
     trainer.test(srgan_train, sr_datamodule)
     
 if __name__ == "__main__":
-    config = yaml.load(open("/media/youngwon/Neo/NeoChoi/Projects/SRGAN/config.yaml", 'r'), Loader=yaml.FullLoader)
+    config = yaml.load(open("./config.yaml", 'r'), Loader=yaml.FullLoader)
     
     main(config)
     
